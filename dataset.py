@@ -30,7 +30,7 @@ class MarketDataset(torch.utils.data.Dataset):
         }
         for f in files:
             df = pd.read_pickle(f)
-            df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict.get(x, -1))
+            df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
             data.append(df.values)
             df_index.append(df.index.values)
             df_day = df_day + [int(f[-12:-4])] * len(df)
@@ -56,13 +56,16 @@ class MarketDataset(torch.utils.data.Dataset):
         daily_data = self.data[idx, :25].reshape(5, 5)
         daily_data = (daily_data - self.daily_mean) / self.daily_std
         minute_data = self.data[idx, 25:241 * 2+ 25].reshape(2, 241).T
-        no_trade_index = np.where(minute_data[:, 1] == 0)[0]
+        no_trade_index = (minute_data[:, 1] == 0).astype(int)
         minute_data = (minute_data - np.array([self.ret_mean, self.to_mean])) / np.array([self.ret_std, self.to_std])
         minute_label =(self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int)
         zt_label = self.data[idx, -2]
 
         zt_limit = self.data[idx, -1]
-        return (daily_data, minute_data, zt_limit, no_trade_index), (minute_label, zt_label)
+
+        # feature: (5*5), (241*2), (1), (241)
+        # label: (241), (0 or 1)
+        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32), no_trade_index.astype(np.float32)), (minute_label.astype(np.float32), zt_label.astype(np.float32))
 
     def __len__(self):
         return len(self.data)

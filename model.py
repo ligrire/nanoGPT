@@ -108,7 +108,7 @@ class Block(nn.Module):
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    # vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
@@ -119,23 +119,31 @@ class GPT(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        assert config.vocab_size is not None
+        # assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
+            daily_proj = nn.Linear(5, config.n_embd),
+            minute_proj = nn.Linear(2, config.n_embd),
+            zt_limit_emb = nn.Embedding(3, config.n_embd),
+
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+
+        self.no_trade_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
+        self.seperate_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
+        # self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.n_embd, 2)
+        
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        # self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -167,14 +175,33 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
-        device = idx.device
-        b, t = idx.size()
+    def forward(self, X, targets=None):
+        # daily_data: (b, num_days, channels(5))
+        # minute_data: (b, num_minutes, channels(2))
+        # zt_limit: (b)
+        # no_trade_index: (b, num_minutes)
+        daily_data, minute_data, zt_limit, no_trade_index = X
+        device = daily_data.device
+        
+        # b, t = idx.size()
+        b = daily_data.size(0)
+        num_days = daily_data.size(1)
+        num_minutes = minute_data.size(1)
+        t = num_days + num_minutes + 2
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
+        zt_limit_token = self.transformer.zt_limit_emb(zt_limit) # (b, n_embd)
+        daily_token = self.transformer.daily_proj(daily_data) # (b, num_days, n_embd)
+        minute_token = self.transformer.minute_proj(minute_data) # (b, num_minutes, n_embd)
+        # replace minute_token with no_trade_token where no_trade_index == 1
+        minute_token = minute_token * (1 - no_trade_index.unsqueeze(-1)) + no_trade_index.unsqueeze(-1) * self.no_trade_token
+        # concat zt_limit_token, daily_token, minute_token
+        # seperate daily_token and minute_token with seperate_token
+        tok_emb = torch.cat([zt_limit_token.unsqueeze(1), daily_token, self.seperate_token.repeat(b, 1, 1), minute_token], dim=1) # (b, num_days + num_minutes + 2, n_embd)  
+
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
@@ -183,8 +210,9 @@ class GPT(nn.Module):
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            minute_label, zt_label = targets
+            logits = self.lm_head(x[:, -num_minutes:, :]) # (b, num_minutes, 2)
+            loss = (F.binary_cross_entropy_with_logits(logits[:, :, 0], minute_label) + F.binary_cross_entropy_with_logits(logits[:, :, 1], zt_label.repeat(num_minutes, 1).T)) / 2
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
@@ -328,3 +356,39 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+    
+
+
+if __name__ == '__main__':
+    from torch.utils.data import DataLoader
+    from dataset import MarketDataset
+    import os
+    path = '/Users/shitiancheng/quant/github/sample_data'
+    files = os.listdir(path)
+    files = [os.path.join(path, f) for f in files if f.endswith('.pkl')]
+    dataset = MarketDataset(files)
+    train_data = dataset
+    batch_size = 10
+    device_type = 'cpu'
+    device = 'cpu'
+    def get_batch(split):
+        data = train_data if split == 'train' else val_data
+        ix = torch.randint(len(data), (batch_size,))
+        x, y = torch.utils.data.dataloader.default_collate([data[i] for i in ix])
+        if device_type == 'cuda':
+            # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+            for i in range(len(x)):
+                x[i] = x[i].pin_memory().to(device, non_blocking=True)
+            for i in range(len(y)):
+                y[i] = y[i].pin_memory().to(device, non_blocking=True)
+        else:
+            for i in range(len(x)):
+                x[i] = x[i].to(device)
+            for i in range(len(y)):
+                y[i] = y[i].to(device)
+        return x, y
+    X, y = get_batch('train')
+    config = GPTConfig()
+    model = GPT(config)
+    model(X, y)
+    3

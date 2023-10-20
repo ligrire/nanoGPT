@@ -1,0 +1,81 @@
+import pandas as pd
+import numpy as np
+import torch
+
+DAILY_MEAN = np.array([1.55050660e-03,
+                       2.08595957e-02,
+                       -1.82031690e-02,
+                       -1.03080110e-03,
+                       2.86408834e+00])
+DAILY_STD = np.array([[0.026074,
+                       0.02130087,
+                       0.01606067,
+                       0.01244642,
+                       4.13153832]])
+MINUTE_RET_MEAN = 2.8424111888884474e-06
+MINUTE_RET_STD = 0.0022672324784259196
+MINUTE_TO_MEAN = 0.011813153671562965
+MINUTE_TO_STD = 0.03699517976566984
+
+class MarketDataset(torch.utils.data.Dataset):
+    def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
+                 up_threshold=0.03) -> None:
+        data = []
+        df_index = []
+        df_day = []
+        mapping_dict = {
+            (-5, 5): 0,
+            (-10, 10): 1,
+            (-20, 20): 2,
+        }
+        for f in files:
+            df = pd.read_pickle(f)
+            df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict.get(x, -1))
+            data.append(df.values)
+            df_index.append(df.index.values)
+            df_day = df_day + [int(f[-12:-4])] * len(df)
+        self.df_day = np.array(df_day)
+        self.df_index = np.hstack(df_index)
+        self.data = np.vstack(data)
+        self.daily_mean = daily_mean
+        self.daily_std = daily_std
+        self.ret_mean = ret_mean
+        self.ret_std = ret_std
+        self.to_mean = to_mean
+        self.to_std = to_std
+        self.up_threshold = up_threshold
+
+    def get_item_with_info(self, idx):
+        return {
+            'data': self.__getitem__(idx),
+            'day': self.df_day[idx],
+            'stock': self.df_index[idx],
+        }
+    
+    def __getitem__(self, idx):
+        daily_data = self.data[idx, :25].reshape(5, 5)
+        daily_data = (daily_data - self.daily_mean) / self.daily_std
+        minute_data = self.data[idx, 25:241 * 2+ 25].reshape(2, 241).T
+        no_trade_index = np.where(minute_data[:, 1] == 0)[0]
+        minute_data = (minute_data - np.array([self.ret_mean, self.to_mean])) / np.array([self.ret_std, self.to_std])
+        minute_label =(self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int)
+        zt_label = self.data[idx, -2]
+
+        zt_limit = self.data[idx, -1]
+        return (daily_data, minute_data, zt_limit, no_trade_index), (minute_label, zt_label)
+
+    def __len__(self):
+        return len(self.data)
+
+
+if __name__ == '__main__':
+    import os
+    path = '/Users/shitiancheng/quant/github/sample_data'
+    files = os.listdir(path)
+    files = [os.path.join(path, f) for f in files if f.endswith('.pkl')]
+    dataset = MarketDataset(files)
+    import random
+    for i in range(10):
+        rand_i = random.randint(0, len(dataset))
+        x = dataset.get_item_with_info(rand_i)
+

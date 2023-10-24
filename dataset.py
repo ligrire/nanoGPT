@@ -33,7 +33,8 @@ class MarketDataset(torch.utils.data.Dataset):
         for f in files:
             df = pd.read_pickle(f)
             df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
-            data.append(df.values)
+            df = df[~df.isna().any(axis=1)]
+            data.append(df.values.astype(np.float32))
             if need_track:
                 df_index.append(df.index.values)
                 df_day = df_day + [int(f[-12:-4])] * len(df)

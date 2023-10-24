@@ -27,6 +27,7 @@ class MarketDataset(torch.utils.data.Dataset):
             (-5, 5): 0,
             (-10, 10): 1,
             (-20, 20): 2,
+            (0, 0): 3
         }
         for f in files:
             df = pd.read_pickle(f)

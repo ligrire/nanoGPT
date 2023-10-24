@@ -126,7 +126,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             daily_proj = nn.Linear(5, config.n_embd),
             minute_proj = nn.Linear(2, config.n_embd),
-            zt_limit_emb = nn.Embedding(3, config.n_embd),
+            zt_limit_emb = nn.Embedding(4, config.n_embd),
 
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),

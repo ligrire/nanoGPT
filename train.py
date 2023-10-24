@@ -122,8 +122,8 @@ train_files.sort()
 val_files.sort()
 print(f"train files: {train_files}")
 print(f"val files: {val_files}")
-train_data = MarketDataset(train_files)
-val_data = MarketDataset(val_files)
+train_data = MarketDataset(train_files, max_sample_size=12000000)
+val_data = MarketDataset(val_files, max_sample_size=2000000)
 
 
 def get_batch(split):

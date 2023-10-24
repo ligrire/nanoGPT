@@ -19,8 +19,8 @@ MINUTE_TO_STD = 0.03699517976566984
 
 class MarketDataset(torch.utils.data.Dataset):
     def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
-                 up_threshold=0.03, need_track=False) -> None:
-        self.data = np.empty((10000000, 750), dtype=np.float32)
+                 up_threshold=0.03, need_track=False, max_sample_size=1000000) -> None:
+        self.data = np.zeros((max_sample_size, 750), dtype=np.float32)
         if need_track:
             df_index = []
             df_day = []

@@ -40,24 +40,24 @@ eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = False # disabled by default
-wandb_project = 'owt'
+wandb_log = True # disabled by default
+wandb_project = 'quant'
 wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
-dataset = '../sample_data'
-gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
-batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch size
-block_size = 1024
+dataset = '../data'
+gradient_accumulation_steps = 1 # used to simulate larger batch sizes
+batch_size = 512 # if gradient_accumulation_steps > 1, this is the micro-batch size
+block_size = 248
 # model
-n_layer = 12
-n_head = 12
-n_embd = 768
+n_layer = 8
+n_head = 4
+n_embd = 128
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 6e-4 # max learning rate
+learning_rate = 1e-3 # max learning rate
 max_iters = 600000 # total number of training iterations
-weight_decay = 1e-1
+weight_decay = 1e-2
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
@@ -65,11 +65,11 @@ grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 decay_lr = True # whether to decay the learning rate
 warmup_iters = 2000 # how many steps to warm up for
 lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
-min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+min_lr =1e-4 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
-device = 'cpu' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
@@ -120,8 +120,6 @@ train_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.ends
 val_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f >= '20230101.pkl']
 train_files.sort()
 val_files.sort()
-print(f"train files: {train_files}")
-print(f"val files: {val_files}")
 train_data = MarketDataset(train_files)
 val_data = MarketDataset(val_files)
 

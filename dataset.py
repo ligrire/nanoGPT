@@ -20,7 +20,7 @@ MINUTE_TO_STD = 0.03699517976566984
 class MarketDataset(torch.utils.data.Dataset):
     def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
                  up_threshold=0.03, need_track=False) -> None:
-        data = []
+        self.data = np.empty((10000000, 750), dtype=np.float32)
         if need_track:
             df_index = []
             df_day = []
@@ -30,18 +30,21 @@ class MarketDataset(torch.utils.data.Dataset):
             (-20, 20): 2,
             (0, 0): 3
         }
+        num_sample = 0
         for f in files:
             df = pd.read_pickle(f)
             df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
             df = df[~df.isna().any(axis=1)]
-            data.append(df.values.astype(np.float32))
+            self.data[num_sample:num_sample + len(df)] = df.values.astype(np.float32)
+            num_sample += len(df)
             if need_track:
                 df_index.append(df.index.values)
                 df_day = df_day + [int(f[-12:-4])] * len(df)
         if need_track:
             self.df_day = np.array(df_day)
             self.df_index = np.hstack(df_index)
-        self.data = np.vstack(data)
+        self.data = self.data[:num_sample]
+        print(f'load {num_sample} samples')
         self.daily_mean = daily_mean
         self.daily_std = daily_std
         self.ret_mean = ret_mean

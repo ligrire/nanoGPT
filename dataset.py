@@ -19,10 +19,11 @@ MINUTE_TO_STD = 0.03699517976566984
 
 class MarketDataset(torch.utils.data.Dataset):
     def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
-                 up_threshold=0.03) -> None:
+                 up_threshold=0.03, need_track=False) -> None:
         data = []
-        df_index = []
-        df_day = []
+        if need_track:
+            df_index = []
+            df_day = []
         mapping_dict = {
             (-5, 5): 0,
             (-10, 10): 1,
@@ -33,10 +34,12 @@ class MarketDataset(torch.utils.data.Dataset):
             df = pd.read_pickle(f)
             df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
             data.append(df.values)
-            df_index.append(df.index.values)
-            df_day = df_day + [int(f[-12:-4])] * len(df)
-        self.df_day = np.array(df_day)
-        self.df_index = np.hstack(df_index)
+            if need_track:
+                df_index.append(df.index.values)
+                df_day = df_day + [int(f[-12:-4])] * len(df)
+        if need_track:
+            self.df_day = np.array(df_day)
+            self.df_index = np.hstack(df_index)
         self.data = np.vstack(data)
         self.daily_mean = daily_mean
         self.daily_std = daily_std

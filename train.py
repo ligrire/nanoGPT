@@ -120,8 +120,8 @@ train_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.ends
 val_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f >= '20230101.pkl']
 train_files.sort()
 val_files.sort()
-train_data = MarketDataset(train_files)
-val_data = MarketDataset(val_files)
+train_data = MarketDataset(train_files, max_sample_size=12000000)
+val_data = MarketDataset(val_files, max_sample_size=2000000)
 
 
 def get_batch(split):

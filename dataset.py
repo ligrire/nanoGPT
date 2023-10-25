@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
+from scipy.stats import rankdata
 
 DAILY_MEAN = np.array([1.55050660e-03,
                        2.08595957e-02,
@@ -35,6 +36,7 @@ class MarketDataset(torch.utils.data.Dataset):
             df = pd.read_pickle(f)
             df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
             df = df[~df.isna().any(axis=1)]
+            df['next_ret'] = rankdata(df['next_ret'].values, axis=0) / df['next_ret'].shape[0]
             self.data[num_sample:num_sample + len(df)] = df.values.astype(np.float32)
             num_sample += len(df)
             if need_track:
@@ -67,7 +69,6 @@ class MarketDataset(torch.utils.data.Dataset):
         no_trade_index = (minute_data[:, 1] == 0).astype(int)
         minute_data = (minute_data - np.array([self.ret_mean, self.to_mean])) / np.array([self.ret_std, self.to_std])
         minute_label = self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] 
-        minute_label[minute_label < 0] *= 2 
         zt_label = self.data[idx, -2]
 
         zt_limit = self.data[idx, -1]

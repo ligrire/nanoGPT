@@ -68,7 +68,7 @@ class MarketDataset(torch.utils.data.Dataset):
         minute_data = self.data[idx, 25:241 * 2+ 25].reshape(2, 241).T
         no_trade_index = (minute_data[:, 1] == 0).astype(int)
         minute_data = (minute_data - np.array([self.ret_mean, self.to_mean])) / np.array([self.ret_std, self.to_std])
-        minute_label = (self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int) 
+        minute_label = self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] 
         zt_label = self.data[idx, -2]
 
         zt_limit = self.data[idx, -1]

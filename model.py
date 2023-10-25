@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from pytorch_forecasting.metrics.quantile import QuantileLoss
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -123,6 +124,9 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
+        self.quantiles = [0.1, 0.25, 0.5,  0.75, 0.9]
+        self.loss = QuantileLoss(self.quantiles)
+
         self.transformer = nn.ModuleDict(dict(
             daily_proj = nn.Linear(5, config.n_embd),
             minute_proj = nn.Linear(2, config.n_embd),
@@ -138,7 +142,7 @@ class GPT(nn.Module):
         self.seperate_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
         self.seperate_token2 = nn.Parameter(torch.randn(1, 1, config.n_embd)) 
         # self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_head = nn.Linear(config.n_embd, 1)
+        self.lm_head = nn.Linear(config.n_embd, len(self.quantiles))
         
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -219,7 +223,10 @@ class GPT(nn.Module):
             # if we are given some desired targets also calculate the loss
             minute_label, zt_label = targets
             logits = self.lm_head(x[:, -num_minutes:, :]) # (b, num_minutes, 1)
-            loss = F.binary_cross_entropy_with_logits(logits[:, :, 0], minute_label)
+            logits = logits.contiguous().view(-1, len(self.quantiles)), 
+            minute_label = minute_label.contiguous().view(-1, 1)
+            loss = self.loss( logits, minute_label)
+
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim

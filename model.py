@@ -219,7 +219,7 @@ class GPT(nn.Module):
             # if we are given some desired targets also calculate the loss
             minute_label, zt_label = targets
             logits = self.lm_head(x[:, -num_minutes:, :]) # (b, num_minutes, 1)
-            loss = F.mse_loss(logits[:, :, 0], minute_label)
+            loss = F.binary_cross_entropy_with_logits(logits[:, :, 0], minute_label)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim

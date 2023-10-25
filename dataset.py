@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import torch
 from scipy.stats import rankdata
+from tqdm import tqdm
 
 DAILY_MEAN = np.array([1.55050660e-03,
                        2.08595957e-02,
@@ -20,7 +21,7 @@ MINUTE_TO_STD = 0.03699517976566984
 
 class MarketDataset(torch.utils.data.Dataset):
     def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
-                 up_threshold=0.03, need_track=False, max_sample_size=1000000) -> None:
+                 up_threshold=0.04, need_track=False, max_sample_size=1000000) -> None:
         self.data = np.zeros((max_sample_size, 750), dtype=np.float32)
         if need_track:
             df_index = []
@@ -32,11 +33,10 @@ class MarketDataset(torch.utils.data.Dataset):
             (0, 0): 3
         }
         num_sample = 0
-        for f in files:
+        for f in tqdm(files):
             df = pd.read_pickle(f)
             df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
             df = df[~df.isna().any(axis=1)]
-            df['next_ret'] = rankdata(df['next_ret'].values, axis=0) / df['next_ret'].shape[0]
             self.data[num_sample:num_sample + len(df)] = df.values.astype(np.float32)
             num_sample += len(df)
             if need_track:
@@ -68,7 +68,7 @@ class MarketDataset(torch.utils.data.Dataset):
         minute_data = self.data[idx, 25:241 * 2+ 25].reshape(2, 241).T
         no_trade_index = (minute_data[:, 1] == 0).astype(int)
         minute_data = (minute_data - np.array([self.ret_mean, self.to_mean])) / np.array([self.ret_std, self.to_std])
-        minute_label = self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] 
+        minute_label = (self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int) 
         zt_label = self.data[idx, -2]
 
         zt_limit = self.data[idx, -1]

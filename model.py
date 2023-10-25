@@ -126,7 +126,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             daily_proj = nn.Linear(5, config.n_embd),
             minute_proj = nn.Linear(2, config.n_embd),
-            zt_limit_emb = nn.Embedding(4, config.n_embd),
+            # zt_limit_emb = nn.Embedding(4, config.n_embd),
 
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
@@ -136,8 +136,9 @@ class GPT(nn.Module):
 
         self.no_trade_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
         self.seperate_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
+        self.seperate_token2 = nn.Parameter(torch.randn(1, 1, config.n_embd)) 
         # self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_head = nn.Linear(config.n_embd, 2)
+        self.lm_head = nn.Linear(config.n_embd, 1)
         
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -192,14 +193,20 @@ class GPT(nn.Module):
 
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
-        zt_limit_token = self.transformer.zt_limit_emb(zt_limit) # (b, n_embd)
+        # zt_limit_token = self.transformer.zt_limit_emb(zt_limit) # (b, n_embd)
         daily_token = self.transformer.daily_proj(daily_data) # (b, num_days, n_embd)
         minute_token = self.transformer.minute_proj(minute_data) # (b, num_minutes, n_embd)
         # replace minute_token with no_trade_token where no_trade_index == 1
         minute_token = minute_token * (1 - no_trade_index.unsqueeze(-1)) + no_trade_index.unsqueeze(-1) * self.no_trade_token
         # concat zt_limit_token, daily_token, minute_token
         # seperate daily_token and minute_token with seperate_token
-        tok_emb = torch.cat([zt_limit_token.unsqueeze(1), daily_token, self.seperate_token.repeat(b, 1, 1), minute_token], dim=1) # (b, num_days + num_minutes + 2, n_embd)  
+        tok_emb = torch.cat([
+            daily_token, 
+            self.seperate_token.repeat(b, 1, 1), 
+            minute_token[:, 0:1, :],
+            self.seperate_token2.repeat(b, 1, 1),
+            minute_token[:, 1:, :]
+            ], dim=1) # (b, num_days + num_minutes + 2, n_embd)  
 
         # forward the GPT model itself
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
@@ -211,8 +218,8 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             minute_label, zt_label = targets
-            logits = self.lm_head(x[:, -num_minutes:, :]) # (b, num_minutes, 2)
-            loss = (F.binary_cross_entropy_with_logits(logits[:, :, 0], minute_label) + F.binary_cross_entropy_with_logits(logits[:, :, 1], zt_label.repeat(num_minutes, 1).T)) / 2
+            logits = self.lm_head(x[:, -num_minutes:, :]) # (b, num_minutes, 1)
+            loss = F.mse_loss(logits[:, :, 0], minute_label)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim

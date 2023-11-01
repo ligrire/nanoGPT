@@ -17,9 +17,12 @@ MINUTE_RET_STD = 0.0022672324784259196
 MINUTE_TO_MEAN = 0.011813153671562965
 MINUTE_TO_STD = 0.03699517976566984
 
+MINUTE_RATIO_MEAN = 0.000000000
+MINUTE_RATIO_STD = 0.02126
+
 class MarketDataset(torch.utils.data.Dataset):
     def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
-                 up_threshold=0.05, need_track=False, max_sample_size=1000000) -> None:
+                 up_threshold=0.05, need_track=False, max_sample_size=1000000, ratio_mean=MINUTE_RATIO_MEAN, ratio_std=MINUTE_RATIO_STD) -> None:
         self.data = np.zeros((max_sample_size, 750), dtype=np.float32)
         if need_track:
             df_index = []
@@ -34,6 +37,9 @@ class MarketDataset(torch.utils.data.Dataset):
         for f in files:
             df = pd.read_pickle(f)
             df['meta', 'limit'] = df['meta', 'limit'].apply(lambda x: mapping_dict[x])
+            na_rows = df.isna().any(axis=1)
+            if na_rows.any():
+                print(f'na rows: {f}')
             df = df[~df.isna().any(axis=1)]
             self.data[num_sample:num_sample + len(df)] = df.values.astype(np.float32)
             num_sample += len(df)
@@ -53,6 +59,9 @@ class MarketDataset(torch.utils.data.Dataset):
         self.to_std = to_std
         self.up_threshold = up_threshold
 
+        self.ratio_mean = ratio_mean
+        self.ratio_std = ratio_std
+
     def get_item_with_info(self, idx):
         return {
             'data': self.__getitem__(idx),
@@ -63,17 +72,18 @@ class MarketDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         daily_data = self.data[idx, :25].reshape(5, 5)
         daily_data = (daily_data - self.daily_mean) / self.daily_std
-        minute_data = self.data[idx, 25:241 * 2+ 25].reshape(2, 241).T
+        minute_data = self.data[idx, 25:241 * 3+ 25].reshape(3, 241).T
         no_trade_index = (minute_data[:, 1] == 0).astype(int)
-        minute_data = (minute_data - np.array([self.ret_mean, self.to_mean])) / np.array([self.ret_std, self.to_std])
-        minute_label =(self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int)
+        minute_data = (minute_data - np.array([self.ret_mean, self.to_mean, self.ratio_mean])) / np.array([self.ret_std, self.to_std, self.ratio_std])
+
+        # minute_label =(self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int)
         zt_label = self.data[idx, -2]
 
         zt_limit = self.data[idx, -1]
 
         # feature: (5*5), (241*2), (1), (241)
         # label: (241), (0 or 1)
-        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32), no_trade_index.astype(np.float32)), (minute_label.astype(np.float32), zt_label.astype(np.float32))
+        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32), no_trade_index.astype(np.float32)), zt_label.astype(np.float32)
 
     def __len__(self):
         return len(self.data)
@@ -88,5 +98,5 @@ if __name__ == '__main__':
     import random
     for i in range(10):
         rand_i = random.randint(0, len(dataset))
-        x = dataset.get_item_with_info(rand_i)
+        x = dataset[rand_i]
 

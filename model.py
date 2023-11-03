@@ -210,7 +210,7 @@ class GPT(nn.Module):
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            zt_label = targets
+            zt_label, = targets
             logits = self.lm_head(x[:, -num_minutes:, :]) # (b, num_minutes, 1)
             loss =  F.binary_cross_entropy_with_logits(logits[:, :, 0], zt_label.repeat(num_minutes, 1).T)
         else:

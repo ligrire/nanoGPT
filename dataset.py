@@ -83,7 +83,7 @@ class MarketDataset(torch.utils.data.Dataset):
 
         # feature: (5*5), (241*2), (1), (241)
         # label: (241), (0 or 1)
-        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32), no_trade_index.astype(np.float32)), zt_label.astype(np.float32)
+        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32), no_trade_index.astype(np.float32)), (zt_label.astype(np.float32), )
 
     def __len__(self):
         return len(self.data)

@@ -124,9 +124,10 @@ class GPT(nn.Module):
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
-            daily_proj = nn.Linear(5, config.n_embd),
-            minute_proj = nn.Linear(3, config.n_embd),
-            zt_limit_emb = nn.Embedding(4, config.n_embd),
+            daily_proj = nn.Linear(8, config.n_embd),
+            minute_proj = nn.Linear(4, config.n_embd),
+            minute_5_proj = nn.Linear(4 * 5, config.n_embd),
+            zt_limit_emb = nn.Embedding(2, config.n_embd),
 
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
@@ -134,8 +135,9 @@ class GPT(nn.Module):
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
 
-        self.no_trade_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
-        self.seperate_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
+        self.day_sep_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
+        self.seperate_token1 = nn.Parameter(torch.randn(1, 1, config.n_embd))
+        self.seperate_token2 = nn.Parameter(torch.randn(1, 1, config.n_embd))
         # self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head = nn.Linear(config.n_embd, 1)
         
@@ -180,26 +182,41 @@ class GPT(nn.Module):
         # minute_data: (b, num_minutes, channels(2))
         # zt_limit: (b)
         # no_trade_index: (b, num_minutes)
-        daily_data, minute_data, zt_limit, no_trade_index = X
+        daily_data, minute_data, zt_limit  = X
+
+
+
         device = daily_data.device
         
         # b, t = idx.size()
         b = daily_data.size(0)
         num_days = daily_data.size(1)
-        num_minutes = minute_data.size(1)
-        t = num_days + num_minutes + 2
+        prev_minute_data = minute_data[:, :5, :, :].reshape(b, -1, 4).reshape(b, -1, 4*5)
+        today_minute_data = minute_data[:, 5, :, :]
+        prev_num_minutes = prev_minute_data
+        num_minutes = today_minute_data.size(1)
+        t = num_days + 240 + num_minutes + 7
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
 
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
         zt_limit_token = self.transformer.zt_limit_emb(zt_limit) # (b, n_embd)
         daily_token = self.transformer.daily_proj(daily_data) # (b, num_days, n_embd)
-        minute_token = self.transformer.minute_proj(minute_data) # (b, num_minutes, n_embd)
+
+        prev_minute_token = self.transformer.minute_5_proj(prev_minute_data)
+        l = []
+        for i in range(5):
+            l.append(prev_minute_token[:, i*48:(i+1) * 48, :])
+            if i != 4:
+                l.append(self.day_sep_token.repeat(b, 1, 1))
+        
+        prev_minute_token = torch.cat(l, dim=1)
+        minute_token = self.transformer.minute_proj(today_minute_data) # (b, num_minutes, n_embd)
         # replace minute_token with no_trade_token where no_trade_index == 1
-        minute_token = minute_token * (1 - no_trade_index.unsqueeze(-1)) + no_trade_index.unsqueeze(-1) * self.no_trade_token
+        # minute_token = minute_token * (1 - no_trade_index.unsqueeze(-1)) + no_trade_index.unsqueeze(-1) * self.no_trade_token
         # concat zt_limit_token, daily_token, minute_token
         # seperate daily_token and minute_token with seperate_token
-        tok_emb = torch.cat([zt_limit_token.unsqueeze(1), daily_token, self.seperate_token.repeat(b, 1, 1), minute_token], dim=1) # (b, num_days + num_minutes + 2, n_embd)  
+        tok_emb = torch.cat([zt_limit_token.unsqueeze(1), daily_token,  self.seperate_token1.repeat(b, 1, 1),  prev_minute_token, self.seperate_token2.repeat(b, 1, 1), minute_token], dim=1) # (b, 1 + num_days + 1 + 240 + 4 + 1 + num_minutes, n_embd)  
 
         # forward the GPT model itself
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
@@ -366,7 +383,9 @@ if __name__ == '__main__':
     path = '/Users/shitiancheng/quant/github/sample_data'
     files = os.listdir(path)
     files = [os.path.join(path, f) for f in files if f.endswith('.pkl')]
-    dataset = MarketDataset(files)
+    index_files = os.listdir(path+'/index')
+    index_files = [os.path.join(path + '/index', f) for f in index_files if f.endswith('.pkl')] 
+    dataset = MarketDataset(files, index_files=index_files, max_sample_size=10000,)
     train_data = dataset
     batch_size = 10
     device_type = 'cpu'

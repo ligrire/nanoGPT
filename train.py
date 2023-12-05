@@ -42,18 +42,18 @@ init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = True # disabled by default
 wandb_project = 'quant'
-wandb_run_name = 'gpt2' # 'run' + str(time.time())
+wandb_run_name = 'version2' # 'run' + str(time.time())
 # data
 dataset = '../data'
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
-batch_size = 512 # if gradient_accumulation_steps > 1, this is the micro-batch size
-block_size = 248
+batch_size = 256 # if gradient_accumulation_steps > 1, this is the micro-batch size
+block_size = 548
 # model
 n_layer = 8
 n_head = 4
 n_embd = 128
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
-bias = False # do we use bias inside LayerNorm and Linear layers?
+bias = True # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 1e-3 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -116,12 +116,14 @@ data_dir = dataset
 # train_data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
 # val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
 from dataset import MarketDataset
-train_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f < '20230101.pkl']
-val_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f >= '20230101.pkl']
+train_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f > '20170101.pkl' and f < '20230101.pkl']
+val_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f >= '20230801.pkl']
+index_files = os.listdir(data_dir +'/index')
+index_files = [os.path.join(data_dir + '/index', f) for f in index_files if f.endswith('.pkl')] 
 train_files.sort()
 val_files.sort()
-train_data = MarketDataset(train_files, max_sample_size=12000000)
-val_data = MarketDataset(val_files, max_sample_size=2000000)
+train_data = MarketDataset(train_files, max_sample_size=4500000, index_files=index_files)
+val_data = MarketDataset(val_files, max_sample_size=100000, index_files=index_files)
 
 
 def get_batch(split):

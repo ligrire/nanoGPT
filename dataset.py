@@ -2,36 +2,40 @@ import pandas as pd
 import numpy as np
 import torch
 
-DAILY_MEAN = np.array([1.55050660e-03,
-                       2.08595957e-02,
-                       -1.82031690e-02,
-                       -1.03080110e-03,
-                       2.86408834e+00])
-DAILY_STD = np.array([[0.026074,
-                       0.02130087,
-                       0.01606067,
-                       0.01244642,
-                       4.13153832]])
-MINUTE_RET_MEAN = 2.8424111888884474e-06
-MINUTE_RET_STD = 0.0022672324784259196
-MINUTE_TO_MEAN = 0.011813153671562965
-MINUTE_TO_STD = 0.03699517976566984
+DAILY_MEAN = np.array([ 3.83512585e-04,
+                        1.98364143e-02,
+                        -1.91414416e-02,
+                        -9.19866568e-04,
+                        1.14106712e-02])
+DAILY_STD = np.array([2.90859059e-02,
+                        2.41179702e-02,
+                        2.04035480e-02,
+                        1.25962124e-02,
+                        1.57830477e-01])
 
-MINUTE_RATIO_MEAN = 0.000000000
-MINUTE_RATIO_STD = 0.02126
+MINUTE_AMOUNT_MEAN = 827159.1461380336
+MINUTE_AMOUNT_STD = 2997679.795808271
+
+MINUTE_RATIO_MEAN = 4.461887552597751e-05
+MINUTE_RATIO_STD = 0.023476901640949538
 
 class MarketDataset(torch.utils.data.Dataset):
-    def __init__(self, files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD, ret_mean=MINUTE_RET_MEAN, ret_std=MINUTE_RET_STD, to_mean=MINUTE_TO_MEAN, to_std=MINUTE_TO_STD, 
-                 up_threshold=0.05, need_track=False, max_sample_size=1000000, ratio_mean=MINUTE_RATIO_MEAN, ratio_std=MINUTE_RATIO_STD) -> None:
-        self.data = np.zeros((max_sample_size, 750), dtype=np.float32)
+    def __init__(self, files, index_files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD,  to_mean=MINUTE_AMOUNT_MEAN, to_std=MINUTE_AMOUNT_STD, 
+                  need_track=True, max_sample_size=1000000, ratio_mean=MINUTE_RATIO_MEAN, ratio_std=MINUTE_RATIO_STD) -> None:
+        self.data = np.zeros((max_sample_size, 3248), dtype=np.float32)
+        self.index_data = {}
+        self.trade_days = []
+        index_files.sort()
+        for f in index_files:
+            df = pd.read_pickle(f)
+            self.index_data[int(f[-12:-4])] = df
+            self.trade_days.append(int(f[-12:-4]))
         if need_track:
             df_index = []
             df_day = []
         mapping_dict = {
-            (-5, 5): 0,
-            (-10, 10): 1,
-            (-20, 20): 2,
-            (0, 0): 3
+            (-10, 10): 0,
+            (-20, 20): 1,
         }
         num_sample = 0
         for f in files:
@@ -50,14 +54,12 @@ class MarketDataset(torch.utils.data.Dataset):
             self.df_day = np.array(df_day)
             self.df_index = np.hstack(df_index)
         self.data = self.data[:num_sample]
+        self.data.flags.writeable = False
         print(f'load {num_sample} samples')
         self.daily_mean = daily_mean
         self.daily_std = daily_std
-        self.ret_mean = ret_mean
-        self.ret_std = ret_std
         self.to_mean = to_mean
         self.to_std = to_std
-        self.up_threshold = up_threshold
 
         self.ratio_mean = ratio_mean
         self.ratio_std = ratio_std
@@ -70,31 +72,65 @@ class MarketDataset(torch.utils.data.Dataset):
         }
     
     def __getitem__(self, idx):
-        daily_data = self.data[idx, :25].reshape(5, 5)
-        daily_data = (daily_data - self.daily_mean) / self.daily_std
-        minute_data = self.data[idx, 25:241 * 3+ 25].reshape(3, 241).T
-        no_trade_index = (minute_data[:, 1] == 0).astype(int)
-        minute_data = (minute_data - np.array([self.ret_mean, self.to_mean, self.ratio_mean])) / np.array([self.ret_std, self.to_std, self.ratio_std])
+        current_day_index = self.trade_days.index(self.df_day[idx])
 
-        # minute_label =(self.data[idx, 241 * 2+ 25: 241 * 2+ 25 + 241] > self.up_threshold).astype(int)
+        index_close = []
+        index_minute = []
+        for i in range(current_day_index - 61, current_day_index):
+            last_df = self.index_data[self.trade_days[i-1]]
+            index_df = self.index_data[self.trade_days[i]]
+            index_close.append(index_df.iloc[-1, :].values / last_df.iloc[-1, :].values - 1)
+
+        index_close = np.vstack(index_close)
+        index_close = (index_close - self.daily_mean[0]) / self.daily_std[0]
+
+        for i in range(current_day_index - 5, current_day_index + 1):
+            last_df = self.index_data[self.trade_days[i-1]]
+            index_df = self.index_data[self.trade_days[i]]
+            index_minute.append(index_df / last_df.iloc[-1, :].values - 1)
+
+        index_minute = np.stack(index_minute)
+        index_minute = (index_minute - self.ratio_mean)/ self.ratio_std
+
+
+        daily_data = self.data[idx, :61*6].reshape(61, 6).copy()
+        daily_data[:, :5] = (daily_data[:, :5] - self.daily_mean) / self.daily_std
+ 
+        daily_data[:, 5] = (daily_data[:, 5] - daily_data[:, 5].mean()) / daily_data[:, 5].std()
+
+        daily_data = np.concatenate([daily_data, index_close], axis=1)
+        
+        
+
+        minute_data = self.data[idx, 61*6:61*6+240*6*2].reshape(6, 2, 240)[::-1, :, :].transpose(0, 2, 1)
+
+        minute_data = (minute_data - np.array([self.to_mean, self.ratio_mean])) / np.array([self.to_std, self.ratio_std])
+
+        minute_data = np.concatenate([minute_data, index_minute ], axis=2)
+
         zt_label = self.data[idx, -2]
 
         zt_limit = self.data[idx, -1]
 
         # feature: (5*5), (241*2), (1), (241)
         # label: (241), (0 or 1)
-        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32), no_trade_index.astype(np.float32)), (zt_label.astype(np.float32), )
+        return (daily_data.astype(np.float32), minute_data.astype(np.float32), zt_limit.astype(np.int32)), (zt_label.astype(np.float32), )
 
     def __len__(self):
         return len(self.data)
 
 
 if __name__ == '__main__':
+    import random
+    random.seed(42)
+    np.random.seed(42)
     import os
     path = '/Users/shitiancheng/quant/github/sample_data'
     files = os.listdir(path)
     files = [os.path.join(path, f) for f in files if f.endswith('.pkl')]
-    dataset = MarketDataset(files)
+    index_files = os.listdir(path+'/index')
+    index_files = [os.path.join(path + '/index', f) for f in index_files if f.endswith('.pkl')] 
+    dataset = MarketDataset(files, index_files=index_files, max_sample_size=10000,)
     import random
     for i in range(10):
         rand_i = random.randint(0, len(dataset))

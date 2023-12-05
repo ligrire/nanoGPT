@@ -21,7 +21,7 @@ MINUTE_RATIO_STD = 0.023476901640949538
 
 class MarketDataset(torch.utils.data.Dataset):
     def __init__(self, files, index_files, daily_mean=DAILY_MEAN, daily_std=DAILY_STD,  to_mean=MINUTE_AMOUNT_MEAN, to_std=MINUTE_AMOUNT_STD, 
-                  need_track=True, max_sample_size=1000000, ratio_mean=MINUTE_RATIO_MEAN, ratio_std=MINUTE_RATIO_STD) -> None:
+                  need_track=False, max_sample_size=1000000, ratio_mean=MINUTE_RATIO_MEAN, ratio_std=MINUTE_RATIO_STD) -> None:
         self.data = np.zeros((max_sample_size, 3248), dtype=np.float32)
         self.index_data = {}
         self.trade_days = []
@@ -32,7 +32,7 @@ class MarketDataset(torch.utils.data.Dataset):
             self.trade_days.append(int(f[-12:-4]))
         if need_track:
             df_index = []
-            df_day = []
+        self.df_day = []
         mapping_dict = {
             (-10, 10): 0,
             (-20, 20): 1,
@@ -49,10 +49,11 @@ class MarketDataset(torch.utils.data.Dataset):
             num_sample += len(df)
             if need_track:
                 df_index.append(df.index.values)
-                df_day = df_day + [int(f[-12:-4])] * len(df)
+            self.df_day = self.df_day + [int(f[-12:-4])] * len(df)
         if need_track:
-            self.df_day = np.array(df_day)
             self.df_index = np.hstack(df_index)
+        self.df_day = np.array(self.df_day)
+
         self.data = self.data[:num_sample]
         self.data.flags.writeable = False
         print(f'load {num_sample} samples')

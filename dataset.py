@@ -34,6 +34,7 @@ class MarketDataset(torch.utils.data.Dataset):
                 start = True
             if start:
                 last_df = pd.read_pickle(index_files[i-1])
+                assert (last_df.columns == [b'000300', b'000852']).all()
                 df = pd.read_pickle(index_files[i])
                 self.index_data.append(df / last_df.iloc[-1, :].values - 1)
                 self.trade_days.append(int(index_files[i][-12:-4]))

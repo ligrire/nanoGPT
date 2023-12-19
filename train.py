@@ -15,7 +15,7 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=0 --master_addr=123.456.123
 $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123.456 --master_port=1234 train.py
 (If your cluster does not have Infiniband interconnect prepend NCCL_IB_DISABLE=1)
 """
-
+import futures_data as fd
 import os
 import time
 import math
@@ -46,7 +46,7 @@ wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
 dataset = '../data'
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
-batch_size = 512 # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 248
 # model
 n_layer = 8
@@ -115,31 +115,26 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 data_dir = dataset
 # train_data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
 # val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-from dataset import MarketDataset
-train_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f < '20230101.pkl']
-val_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f >= '20230101.pkl']
-train_files.sort()
-val_files.sort()
-train_data = MarketDataset(train_files, max_sample_size=12000000)
-val_data = MarketDataset(val_files, max_sample_size=2000000)
-
+# from dataset import MarketDataset
+# train_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f < '20230101.pkl']
+# val_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.pkl') and f >= '20230101.pkl']
+# train_files.sort()
+# val_files.sort()
+# train_data = MarketDataset(train_files, max_sample_size=12000000)
+# val_data = MarketDataset(val_files, max_sample_size=2000000)
+train_data = fd.load_data('20100101', '20230901') 
+val_data = fd.load_data('20230902', '20231215') 
 
 def get_batch(split):
     data = train_data if split == 'train' else val_data
-    ix = torch.randint(len(data), (batch_size,))
-    x, y = torch.utils.data.dataloader.default_collate([data[i] for i in ix])
+    x, y, futures = fd.get_batch(data, 4, batch_size)
+    x, y, futures = torch.Tensor(x), torch.Tensor(y), torch.LongTensor(futures)
     if device_type == 'cuda':
         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        for i in range(len(x)):
-            x[i] = x[i].pin_memory().to(device, non_blocking=True)
-        for i in range(len(y)):
-            y[i] = y[i].pin_memory().to(device, non_blocking=True)
+        x, y, futures = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True),  futures.pin_memory().to(device, non_blocking=True)
     else:
-        for i in range(len(x)):
-            x[i] = x[i].to(device)
-        for i in range(len(y)):
-            y[i] = y[i].to(device)
-    return x, y
+        x, y, futures = x.to(device), y.to(device), futures.to(device)
+    return (x, futures), y
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0

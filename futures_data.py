@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import itertools
 import os
 from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader
+
 RET_MEAN_STD = 0.00033422861928492277, 2.0654060785101094
 PREMIUM_MEAN_STD = -130.87443697806327, 211.71141822708947
 PREMIUM_DIFF_MEAN_STD = 0.0004550047121431646, 2.0737513824379423
@@ -19,6 +21,126 @@ CHANGE_MONTH = ['01', '04', '07', '10']
 delivery_date = pd.read_pickle(os.path.join(DATA_DIR, 'delivery.pkl'))
 DELIVERY_DATE = delivery_date[0].values
 
+PAIRS= [(b'IC01', b'IC02'),
+ (b'IC01', b'IC03'),
+ (b'IC01', b'IF02'),
+ (b'IC01', b'IF04'),
+ (b'IC01', b'IH02'),
+ (b'IC01', b'IH03'),
+ (b'IC01', b'IH04'),
+ (b'IC01', b'IM01'),
+ (b'IC01', b'IM03'),
+ (b'IC01', b'IM04'),
+ (b'IC02', b'IC03'),
+ (b'IC02', b'IH03'),
+ (b'IC02', b'IH04'),
+ (b'IC02', b'IM03'),
+ (b'IC02', b'IM04'),
+ (b'IC03', b'IH04'),
+ (b'IC03', b'IM03'),
+ (b'IC03', b'IM04'),
+ (b'IC04', b'IC01'),
+ (b'IC04', b'IC02'),
+ (b'IC04', b'IC03'),
+ (b'IC04', b'IF01'),
+ (b'IC04', b'IF02'),
+ (b'IC04', b'IF04'),
+ (b'IC04', b'IH02'),
+ (b'IC04', b'IH03'),
+ (b'IC04', b'IH04'),
+ (b'IC04', b'IM01'),
+ (b'IC04', b'IM03'),
+ (b'IC04', b'IM04'),
+ (b'IF01', b'IC01'),
+ (b'IF01', b'IC02'),
+ (b'IF01', b'IC03'),
+ (b'IF01', b'IF02'),
+ (b'IF01', b'IF04'),
+ (b'IF01', b'IH02'),
+ (b'IF01', b'IH03'),
+ (b'IF01', b'IH04'),
+ (b'IF01', b'IM01'),
+ (b'IF01', b'IM03'),
+ (b'IF01', b'IM04'),
+ (b'IF02', b'IC02'),
+ (b'IF02', b'IC03'),
+ (b'IF02', b'IH03'),
+ (b'IF02', b'IH04'),
+ (b'IF02', b'IM03'),
+ (b'IF02', b'IM04'),
+ (b'IF03', b'IC01'),
+ (b'IF03', b'IC02'),
+ (b'IF03', b'IC03'),
+ (b'IF03', b'IC04'),
+ (b'IF03', b'IF01'),
+ (b'IF03', b'IF02'),
+ (b'IF03', b'IF04'),
+ (b'IF03', b'IH01'),
+ (b'IF03', b'IH02'),
+ (b'IF03', b'IH03'),
+ (b'IF03', b'IH04'),
+ (b'IF03', b'IM01'),
+ (b'IF03', b'IM02'),
+ (b'IF03', b'IM03'),
+ (b'IF03', b'IM04'),
+ (b'IF04', b'IC02'),
+ (b'IF04', b'IC03'),
+ (b'IF04', b'IF02'),
+ (b'IF04', b'IH02'),
+ (b'IF04', b'IH03'),
+ (b'IF04', b'IH04'),
+ (b'IF04', b'IM03'),
+ (b'IF04', b'IM04'),
+ (b'IH01', b'IC01'),
+ (b'IH01', b'IC02'),
+ (b'IH01', b'IC03'),
+ (b'IH01', b'IC04'),
+ (b'IH01', b'IF01'),
+ (b'IH01', b'IF02'),
+ (b'IH01', b'IF04'),
+ (b'IH01', b'IH02'),
+ (b'IH01', b'IH03'),
+ (b'IH01', b'IH04'),
+ (b'IH01', b'IM01'),
+ (b'IH01', b'IM02'),
+ (b'IH01', b'IM03'),
+ (b'IH01', b'IM04'),
+ (b'IH02', b'IC02'),
+ (b'IH02', b'IC03'),
+ (b'IH02', b'IF02'),
+ (b'IH02', b'IH03'),
+ (b'IH02', b'IH04'),
+ (b'IH02', b'IM03'),
+ (b'IH02', b'IM04'),
+ (b'IH03', b'IC03'),
+ (b'IH03', b'IH04'),
+ (b'IH03', b'IM03'),
+ (b'IH03', b'IM04'),
+ (b'IH04', b'IM04'),
+ (b'IM01', b'IC02'),
+ (b'IM01', b'IC03'),
+ (b'IM01', b'IF02'),
+ (b'IM01', b'IF04'),
+ (b'IM01', b'IH02'),
+ (b'IM01', b'IH03'),
+ (b'IM01', b'IH04'),
+ (b'IM01', b'IM03'),
+ (b'IM01', b'IM04'),
+ (b'IM02', b'IC01'),
+ (b'IM02', b'IC02'),
+ (b'IM02', b'IC03'),
+ (b'IM02', b'IC04'),
+ (b'IM02', b'IF01'),
+ (b'IM02', b'IF02'),
+ (b'IM02', b'IF04'),
+ (b'IM02', b'IH02'),
+ (b'IM02', b'IH03'),
+ (b'IM02', b'IH04'),
+ (b'IM02', b'IM01'),
+ (b'IM02', b'IM03'),
+ (b'IM02', b'IM04'),
+ (b'IM03', b'IH04'),
+ (b'IM03', b'IM04')]
 
 def load_data(start_time, end_time, data_dir=DATA_DIR):
 
@@ -90,7 +212,8 @@ def get_target_df(df, futures_columns):
 def get_n_days(index, n, data, future_id):
     
     futures_types = [future_id.decode()[-2:]]
-
+    if future_id.decode()[:-2] == 'IM' and data[index-n+1]['date'] < '20220722':
+        return None
     
     delievery_happens = False
     for i in range(1, n):
@@ -145,15 +268,22 @@ def preprocess(df, ret_mean_std, premium_mean_std, premium_diff_mean_std):
     return df
 
 
-def get_next(data, window, need_preprocess):
-    index = np.random.randint(window, len(data))
+def get_next(data, window, need_preprocess, index=None, futures_chosen=None):
+    if index is None:
+        index = np.random.randint(window, len(data))
     futures = data[index-window]['ret_df'].columns
     data1 = None
     data2 = None
-    while (data1 is None) or (data2 is None): 
-        futures_chosen = np.random.choice(futures, 2, replace=False)
+    if futures_chosen is None:
+        while (data1 is None) or (data2 is None): 
+            futures_chosen = np.random.choice(futures, 2, replace=False)
+            data1 = get_n_days(index, window+1, data, futures_chosen[0])
+            data2 = get_n_days(index, window+1, data, futures_chosen[1])
+    else:
         data1 = get_n_days(index, window+1, data, futures_chosen[0])
-        data2 = get_n_days(index, window+1, data, futures_chosen[1])
+        data2 = get_n_days(index, window+1, data, futures_chosen[1])   
+        if data1 is None or data2 is None:
+            return None
     if need_preprocess:
         data1 = preprocess(data1,RET_MEAN_STD, PREMIUM_MEAN_STD, PREMIUM_DIFF_MEAN_STD)
         data2 = preprocess(data2,RET_MEAN_STD, PREMIUM_MEAN_STD, PREMIUM_DIFF_MEAN_STD)
@@ -183,3 +313,21 @@ def to_numpy(data1, window):
     np.vstack(data1['premium_diff_df'].values).reshape(window, 240, 20)], axis=-1)
 
 
+
+class FutureDataset(Dataset):
+    def __init__(self, path, start_date, end_date):
+        self.path = path
+        self.files = [i for i in os.listdir(path) if i[:8] >=start_date and i[:8] <end_date]
+        
+    def __len__(self):
+        return len(self.files)
+    
+    def __getitem__(self, idx):
+        file_name = self.files[idx]
+        future1 = file_name[9:11]
+        future2 = file_name[14:16]
+        with open(f'{self.path}/{file_name}', 'rb') as f:
+            X = np.load(f).astype(np.float32)
+            y = np.load(f).astype(np.float32)
+        futures = np.array([FUTURE_DICT[future1], FUTURE_DICT[future2]])
+        return X, y, futures

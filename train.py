@@ -25,35 +25,35 @@ from contextlib import nullcontext
 import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader
 from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
-
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
 out_dir = 'out'
-eval_interval = 2000
+eval_interval = 1000
 log_interval = 1
-eval_iters = 200
+# eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
-wandb_log = True # disabled by default
+wandb_log = False # disabled by default
 wandb_project = 'quant'
 wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
 dataset = '../data'
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
-batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
-block_size = 248
+batch_size = 64 # if gradient_accumulation_steps > 1, this is the micro-batch size
+block_size = 966
 # model
-n_layer = 8
+n_layer = 4
 n_head = 4
 n_embd = 128
-dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
-bias = False # do we use bias inside LayerNorm and Linear layers?
+dropout = 0.1 # for pretraining 0 is good, for finetuning try 0.1+
+bias = True # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
 learning_rate = 1e-3 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -122,13 +122,30 @@ data_dir = dataset
 # val_files.sort()
 # train_data = MarketDataset(train_files, max_sample_size=12000000)
 # val_data = MarketDataset(val_files, max_sample_size=2000000)
-train_data = fd.load_data('20100101', '20230901') 
-val_data = fd.load_data('20230902', '20231215') 
+# train_data = fd.load_data('20100101', '20230901') 
+# val_data = fd.load_data('20230901', '20231215') 
 
+train_ds = fd.FutureDataset('../futures_dataset/', '20100101', '20230701')
+val_ds = fd.FutureDataset('../futures_dataset/', '20230701', '20231215')
+
+train_dl = iter(DataLoader(train_ds, batch_size, shuffle=True, pin_memory=True, drop_last=True))
+val_dl = iter(DataLoader(val_ds, batch_size, shuffle=False, pin_memory=True, drop_last=True))
+
+eval_iters = len(val_dl)
 def get_batch(split):
-    data = train_data if split == 'train' else val_data
-    x, y, futures = fd.get_batch(data, 4, batch_size)
-    x, y, futures = torch.Tensor(x), torch.Tensor(y), torch.LongTensor(futures)
+    data = train_dl if split == 'train' else val_dl
+    try:
+        x, y, futures = next(data)
+    except StopIteration:
+        if split == 'train':
+            global train_dl
+            train_dl = iter(DataLoader(train_ds, batch_size, shuffle=True, pin_memory=True, drop_last=True))
+        else:
+            global val_dl
+            val_dl =  iter(DataLoader(val_ds, batch_size, shuffle=False, pin_memory=True, drop_last=True))
+        data = train_dl if split == 'train' else val_dl
+        x, y, futures = next(data)
+
     if device_type == 'cuda':
         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
         x, y, futures = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True),  futures.pin_memory().to(device, non_blocking=True)

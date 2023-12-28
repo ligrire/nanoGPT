@@ -126,7 +126,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             daily_proj = nn.Linear(5, config.n_embd),
             minute_proj = nn.Linear(160, config.n_embd),
-            futures_embed = nn.Embedding(4, config.n_embd),
+            futures_embed = nn.Embedding(2, config.n_embd),
 
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
@@ -187,6 +187,7 @@ class GPT(nn.Module):
         seperate_token = self.seperate_token.repeat(b, days, 1, 1)
         tok_emb = torch.cat([seperate_token, tok_emb], axis=2)
         tok_emb = tok_emb.reshape(b, (minutes+1) * days, -1)
+        futures = (futures[:, 0] == futures[:, 1]).long()
         future_tokens = self.transformer.futures_embed(futures)
         tok_emb = torch.concat([future_tokens, tok_emb], axis=1)
         device = X.device
@@ -195,9 +196,9 @@ class GPT(nn.Module):
         # b = daily_data.size(0)
         # num_days = daily_data.size(1)
         # num_minutes = minute_data.size(1)
-        t = days * (minutes+1) + 2
+        t = days * (minutes+1) + 1
 
-        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        assert t == self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
 
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
@@ -220,11 +221,11 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             
-            logits = self.lm_head(x) # (b, num_days * (num_minutes + 1) +2, 1)
-            logits = logits[:, 2:, :]
+            logits = self.lm_head(x) # (b, num_days * (num_minutes + 1) +1, 1)
+            logits = logits[:, 1:, :]
             logits = logits.reshape(b, days, minutes+1, 3)
-            logits = logits[:, :, 1:minutes-4, :]
-            loss =  F.mse_loss(logits, targets)
+            logits = logits[:, -1, 1:minutes-4, :]
+            loss =  F.mse_loss(logits, targets[:, -1, :, :])
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
@@ -405,9 +406,21 @@ if __name__ == '__main__':
     # model(X, y)
     # 3
     from futures_data import *
-    data = load_data('20230601', '20231201', DATA_DIR) 
-    X, y, futures = get_batch(data, 4, 64)
-    X, y, futures = torch.Tensor(X), torch.Tensor(y), torch.LongTensor(futures)
-    config = GPTConfig()
-    model = GPT(config)
-    model(X, y, futures)
+    data = load_data('20230701', '20231201', DATA_DIR) 
+    import time
+    start = time.time()
+    num_workers = 4
+    pool = Pool(num_workers)  # Create the pool once
+
+    # Process multiple batches
+    for _ in range(10):
+        xs, ys, futures = get_batch_parallel(pool, data, 4, 64, num_workers)
+    print(time.time() - start)
+    start = time.time()
+    for i in range(1):
+       X, y, futures = get_batch(data, 4, 64) 
+    print(time.time() - start)
+    # X, y, futures = torch.Tensor(X), torch.Tensor(y), torch.LongTensor(futures)
+    # config = GPTConfig()
+    # model = GPT(config)
+    # model(X, y, futures)

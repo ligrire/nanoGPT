@@ -189,7 +189,7 @@ class GPT(nn.Module):
         tok_emb = tok_emb.reshape(b, (minutes+1) * days, -1)
         futures = (futures[:, 0] == futures[:, 1]).long()
         future_tokens = self.transformer.futures_embed(futures)
-        tok_emb = torch.concat([future_tokens, tok_emb], axis=1)
+        tok_emb = torch.concat([future_tokens.unsqueeze(1), tok_emb], axis=1)
         device = X.device
         
         # b, t = idx.size()
@@ -198,7 +198,7 @@ class GPT(nn.Module):
         # num_minutes = minute_data.size(1)
         t = days * (minutes+1) + 1
 
-        assert t == self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
 
         pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
@@ -406,21 +406,14 @@ if __name__ == '__main__':
     # model(X, y)
     # 3
     from futures_data import *
-    data = load_data('20230701', '20231201', DATA_DIR) 
-    import time
-    start = time.time()
-    num_workers = 4
-    pool = Pool(num_workers)  # Create the pool once
+    # data = load_data('20230701', '20231201', DATA_DIR) 
+    train_ds = FutureDataset('/Users/shitiancheng/Downloads/futures_dataset/', '20230101', '20230301')
+    # val_ds = fd.FutureDataset('../futures_dataset/', '20230301', '20231215')
 
-    # Process multiple batches
-    for _ in range(10):
-        xs, ys, futures = get_batch_parallel(pool, data, 4, 64, num_workers)
-    print(time.time() - start)
-    start = time.time()
-    for i in range(1):
-       X, y, futures = get_batch(data, 4, 64) 
-    print(time.time() - start)
-    # X, y, futures = torch.Tensor(X), torch.Tensor(y), torch.LongTensor(futures)
-    # config = GPTConfig()
-    # model = GPT(config)
-    # model(X, y, futures)
+    train_dl = DataLoader(train_ds, 4, shuffle=True, pin_memory=True, drop_last=True)
+    x, y, futures = next(iter(train_dl))
+
+    config = GPTConfig()
+    model = GPT(config)
+    X, Y = (x, futures), y
+    logits, loss = model(X, Y)

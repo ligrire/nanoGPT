@@ -137,7 +137,7 @@ class GPT(nn.Module):
         # self.no_trade_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
         self.seperate_token = nn.Parameter(torch.randn(1, 1, config.n_embd))
         # self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_head = nn.Linear(config.n_embd, 3)
+        self.lm_head = nn.Linear(config.n_embd, 9)
         
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -220,12 +220,13 @@ class GPT(nn.Module):
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
+            targets = torch.bucketize(targets, torch.Tensor([-5,5]))
             
             logits = self.lm_head(x) # (b, num_days * (num_minutes + 1) +1, 1)
             logits = logits[:, 1:, :]
-            logits = logits.reshape(b, days, minutes+1, 3)
-            logits = logits[:, -1, 1:minutes-4, :]
-            loss =  F.mse_loss(logits, targets[:, -1, :, :])
+            logits = logits.reshape(b, days, minutes+1, 9)
+            logits = logits[:, -1, 1:minutes-4, :].reshape(b, 235, 3, 3)
+            loss =  F.cross_entropy(logits.reshape(-1, 3), targets[:, -1, :, :].flatten(), label_smoothing=0.1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
